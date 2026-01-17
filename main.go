@@ -54,8 +54,17 @@ func initFirebase() {
         log.Println("Using Application Default Credentials (Cloud Run)")
     }
 
+    // Fix: Ensure ProjectID is set for Auth client
+    projectID := os.Getenv("GOOGLE_CLOUD_PROJECT")
+    if projectID == "" {
+        projectID = "ghostme-34590" // Fallback from config
+        log.Printf("GOOGLE_CLOUD_PROJECT not set. Using fallback: %s", projectID)
+    }
+
+    config := &firebase.Config{ProjectID: projectID}
+
     // If opts is empty, Firebase automatically looks for Cloud Run credentials!
-    app, err := firebase.NewApp(context.Background(), nil, opts...)
+    app, err := firebase.NewApp(context.Background(), config, opts...)
     if err != nil {
         log.Fatalf("Error initializing Firebase: %v", err)
     }
@@ -146,6 +155,7 @@ func main() {
 		// Verify Token via Firebase Admin SDK
 		client, err := firebaseApp.Auth(context.Background())
 		if err != nil {
+			log.Printf("FIREBASE AUTH CLIENT ERROR: %v", err)
 			return c.Status(500).SendString("Auth Error")
 		}
 		
