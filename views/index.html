@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+
+    <title>{{.Title}}</title>
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <script src="https://unpkg.com/htmx.org/dist/ext/ws.js"></script>
+    <script src="https://unpkg.com/htmx.org/dist/ext/json-enc.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Creepster&family=VT323&display=swap" rel="stylesheet">
+    <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+
+    <style>
+        /* Custom Spooky Animations */
+        @keyframes fog {
+            0% { background-position: 0% 50%; opacity: 0.4; }
+            50% { background-position: 100% 50%; opacity: 0.8; }
+            100% { background-position: 0% 50%; opacity: 0.4; }
+        }
+        .fog-bg {
+            background: linear-gradient(270deg, #0f0c29, #302b63, #24243e);
+            background-size: 600% 600%;
+            animation: fog 15s ease infinite;
+        }
+        .font-creep { font-family: 'Creepster', cursive; }
+        .font-term { font-family: 'VT323', monospace; }
+        .glow-text { text-shadow: 0 0 10px #00ff00, 0 0 20px #00ff00; }
+        .glitch-border {
+            box-shadow: 0 0 15px rgba(139, 92, 246, 0.5);
+            border: 1px solid rgba(139, 92, 246, 0.3);
+        }
+    </style>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getAuth, GoogleAuthProvider, signInWithPopup } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+        
+        // IMPORT THE CONFIG HERE
+        import { firebaseConfig } from "/static/js/config.js";
+
+        // No more hardcoded config here! 
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const provider = new GoogleAuthProvider();
+
+        window.loginWithGoogle = async () => {
+            try {
+                const result = await signInWithPopup(auth, provider);
+                const token = await result.user.getIdToken();
+                
+                const response = await fetch('/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ idToken: token })
+                });
+
+                if (response.ok) {
+                    const html = await response.text();
+                    document.getElementById('main-container').outerHTML = html;
+                    htmx.process(document.body);
+                } else {
+                    const errorText = await response.text();
+                    alert("The Spirits Rejected You: " + errorText);
+                }
+            } catch (error) {
+                console.error("Auth Error:", error);
+                alert("Summoning Failed: " + error.message);
+            }
+        };
+    </script>
+</head>
+<body class="fog-bg text-green-500 font-term h-screen flex flex-col items-center justify-center overflow-hidden">
+
+    <div id="main-container" class="relative z-10 w-full max-w-md p-6">
+        <div class="absolute -top-16 -left-10 animate-bounce opacity-30">
+            <svg width="100" height="100" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 2C7.58 2 4 5.58 4 10v10l4-4 4 4 4-4 4 4V10c0-4.42-3.58-8-8-8zm0 13c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z"/>
+            </svg>
+        </div>
+
+        <div class="bg-black/60 backdrop-blur-md glitch-border rounded-xl p-8 text-center">
+            <h1 class="font-creep text-6xl mb-2 text-purple-500 tracking-wider glow-text" style="text-shadow: 0 0 5px #a855f7;">
+                GHOST ME
+            </h1>
+            <p class="text-green-400/70 mb-8 text-xl">Speak to the void. It listens.</p>
+            
+            <button onclick="loginWithGoogle()" 
+                    class="group relative w-full bg-transparent border-2 border-green-500 text-green-500 py-3 px-6 rounded font-bold uppercase tracking-widest hover:bg-green-500 hover:text-black transition-all duration-300 shadow-[0_0_15px_rgba(0,255,0,0.3)] hover:shadow-[0_0_25px_rgba(0,255,0,0.6)]">
+                <span class="flex items-center justify-center gap-3">
+                    <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
+                    Summon Identity
+                </span>
+            </button>
+            <div class="mt-4 text-xs text-purple-400/50">
+                * Requires a verified Gmail soul
+            </div>
+        </div>
+    </div>
+
+</body>
+</html>

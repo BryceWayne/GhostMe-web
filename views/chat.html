@@ -1,0 +1,49 @@
+<div class="relative w-full max-w-lg mx-auto bg-black/80 rounded-lg shadow-[0_0_50px_rgba(168,85,247,0.2)] overflow-hidden border border-purple-900/50" 
+     hx-ext="ws" 
+     ws-connect="/ws">
+
+    <div class="pointer-events-none absolute inset-0 z-20 bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] bg-[length:100%_4px,3px_100%]"></div>
+
+    <div class="bg-gray-900/90 p-4 border-b border-purple-800 flex justify-between items-center relative z-10">
+        <div>
+            <h2 class="font-creep text-3xl text-purple-500 tracking-widest">SÉANCE</h2>
+            <div class="flex items-center gap-2">
+                <div class="w-2 h-2 bg-green-500 rounded-full animate-ping"></div>
+                <span class="text-sm text-green-400 font-term uppercase tracking-widest">Link Established</span>
+            </div>
+        </div>
+        <div class="text-xs text-purple-600 font-term opacity-50 flex flex-col items-end">
+            <span>ENC: AES-256</span>
+            <span>FREQ: 66.6 MHz</span>
+        </div>
+    </div>
+
+    <div id="chat-room" class="h-[500px] overflow-y-auto p-4 space-y-4 flex flex-col relative z-10 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')]">
+        </div>
+
+    <div class="p-4 bg-gray-900/90 border-t border-purple-800 relative z-30">
+        <form ws-send 
+              onsubmit="setTimeout(() => { this.reset(); this.querySelector('textarea').style.height = 'auto'; }, 0)" 
+              class="flex gap-3 items-end">
+            
+            <div class="flex-1 relative group">
+                <div class="absolute -inset-0.5 bg-gradient-to-r from-purple-600 to-green-600 rounded opacity-20 group-hover:opacity-75 transition duration-500 blur"></div>
+                <textarea 
+                       name="text" 
+                       rows="1"
+                       placeholder="Incant your message..." 
+                       class="relative w-full p-3 rounded bg-black text-green-400 font-term text-lg border border-purple-900/50 focus:outline-none focus:border-green-500 placeholder-purple-900/50 resize-none overflow-hidden max-h-24"
+                       autocomplete="off"
+                       oninput="this.style.height = 'auto'; this.style.height = this.scrollHeight + 'px'"
+                       onkeydown="if((event.ctrlKey || event.metaKey) && event.key === 'Enter') { 
+                           event.preventDefault(); 
+                           this.form.requestSubmit(); 
+                       }"></textarea>
+            </div>
+
+            <button type="submit" class="h-12 w-12 flex items-center justify-center rounded bg-purple-900/20 border border-purple-500 text-purple-500 hover:bg-purple-500 hover:text-black transition-all duration-300">
+                <svg class="w-6 h-6 transform rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
+            </button>
+        </form>
+    </div>
+</div>
