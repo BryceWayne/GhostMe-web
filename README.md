@@ -4,7 +4,7 @@
 
 **GhostMe** is a distributed, ephemeral, authenticated chat platform disguised as a paranormal terminal. It combines a "Cyber-Occult" aesthetic with a robust, cloud-native architecture capable of scaling across multiple server instances.
 
-![Go](https://img.shields.io/badge/Go-1.23-00ADD8?style=flat&logo=go)
+![Go](https://img.shields.io/badge/Go-1.24-00ADD8?style=flat&logo=go)
 ![HTMX](https://img.shields.io/badge/HTMX-1.9-blue?style=flat)
 ![Firebase](https://img.shields.io/badge/Auth-Firebase-FFCA28?style=flat&logo=firebase)
 ![GCP](https://img.shields.io/badge/Deploy-Cloud%20Run-4285F4?style=flat&logo=google-cloud)
