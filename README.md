@@ -70,7 +70,7 @@ Download your Firebase Admin private key and save it in the root as:
 
 ```bash
 go mod download
-go run main.go
+go run .
 ```
 
 Open your browser to `http://localhost:8080`.
