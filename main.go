@@ -19,15 +19,6 @@ import (
 	"google.golang.org/api/option"
 )
 
-// --- Global State ---
-var (
-	store       *memorystore.MemoryStore
-	firebaseApp *firebase.App
-	clients     = make(map[*websocket.Conn]*Client)
-	register    = make(chan *websocket.Conn)
-	unregister  = make(chan *websocket.Conn)
-)
-
 // --- Structs ---
 type Client struct {
 	Email       string // REAL Identity (for logging)
@@ -42,64 +33,58 @@ type MessageData struct {
 	IsMine      bool // Helper to style "my" messages vs "others"
 }
 
-// --- Initialization ---
-func initFirebase() {
-    var opts []option.ClientOption
-    
-    // Only use the file if it exists locally
-    if _, err := os.Stat("serviceAccountKey.json"); err == nil {
-        log.Println("Using local serviceAccountKey.json")
-        opts = append(opts, option.WithCredentialsFile("serviceAccountKey.json"))
-    } else {
-        log.Println("Using Application Default Credentials (Cloud Run)")
-    }
-
-    // Fix: Ensure ProjectID is set for Auth client
-    projectID := os.Getenv("GOOGLE_CLOUD_PROJECT")
-    if projectID == "" {
-        projectID = "ghostme-34590" // Fallback from config
-        log.Printf("GOOGLE_CLOUD_PROJECT not set. Using fallback: %s", projectID)
-    }
-
-    config := &firebase.Config{ProjectID: projectID}
-
-    // If opts is empty, Firebase automatically looks for Cloud Run credentials!
-    app, err := firebase.NewApp(context.Background(), config, opts...)
-    if err != nil {
-        log.Fatalf("Error initializing Firebase: %v", err)
-    }
-    firebaseApp = app
+type Server struct {
+	Store      *memorystore.MemoryStore
+	Verifier   Verifier
+	clients    map[*websocket.Conn]*Client
+	register   chan *websocket.Conn
+	unregister chan *websocket.Conn
+	clientsMu  sync.RWMutex
 }
 
-// --- The Hub (Using MemoryStore) ---
-func runHub() {
-	// Subscribe to "chat" topic (Works for Local AND Cloud PubSub)
-	msgs, err := store.Subscribe("chat")
+func NewServer(store *memorystore.MemoryStore, verifier Verifier) *Server {
+	return &Server{
+		Store:      store,
+		Verifier:   verifier,
+		clients:    make(map[*websocket.Conn]*Client),
+		register:   make(chan *websocket.Conn),
+		unregister: make(chan *websocket.Conn),
+	}
+}
+
+func (s *Server) RunHub() {
+	// Subscribe to "chat" topic
+	msgs, err := s.Store.Subscribe("chat")
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	// Fan-out routine: Listen to PubSub -> Send to Local Clients
+	// Fan-out routine
 	go func() {
 		for msgBytes := range msgs {
-			broadcastToLocalClients(string(msgBytes))
+			s.broadcastToLocalClients(string(msgBytes))
 		}
 	}()
 
 	// Connection Management Routine
 	for {
 		select {
-		case connection := <-register:
-			// In a real app, track active user count here
+		case connection := <-s.register:
+			// Handled in WS handler for now to minimize changes,
+			// but effectively we just log or track count here.
 			_ = connection
-		case connection := <-unregister:
-			delete(clients, connection)
+		case connection := <-s.unregister:
+			s.clientsMu.Lock()
+			delete(s.clients, connection)
+			s.clientsMu.Unlock()
 		}
 	}
 }
 
-func broadcastToLocalClients(html string) {
-	for connection, c := range clients {
+func (s *Server) broadcastToLocalClients(html string) {
+	s.clientsMu.RLock()
+	defer s.clientsMu.RUnlock()
+	for connection, c := range s.clients {
 		go func(conn *websocket.Conn, client *Client) {
 			client.mu.Lock()
 			defer client.mu.Unlock()
@@ -109,57 +94,26 @@ func broadcastToLocalClients(html string) {
 	}
 }
 
-// --- Main ---
-func main() {
-	// This forces Go to use the correct header, ignoring the Alpine OS defaults
-    mime.AddExtensionType(".js", "application/javascript")
-
-	initFirebase()
-
-	// Initialize MemoryStore (Cloud vs Local detection)
-	projectID := os.Getenv("GOOGLE_CLOUD_PROJECT")
-	if projectID != "" {
-		log.Println("Using GCP PubSub")
-		store = memorystore.NewMemoryStoreWithConfig(memorystore.Config{GCPProjectID: projectID})
-	} else {
-		log.Println("Using In-Memory PubSub")
-		store = memorystore.NewMemoryStore()
-	}
-	defer store.Stop()
-
-	// Setup View Engine
+// SetupApp configures the Fiber app and routes
+func SetupApp(server *Server) *fiber.App {
 	engine := html.New("./views", ".html")
 	app := fiber.New(fiber.Config{Views: engine})
 
-	// ---------------------------------------------------------
-    // !!! CRITICAL FIX: ENABLE STATIC FILE SERVING !!!
-    // This tells Fiber: "When someone asks for /static, look in ./public"
-    // ---------------------------------------------------------
-    app.Static("/static", "./public")
+	app.Static("/static", "./public")
 
-	// 1. Login Handler (Exchanges Google ID Token for Session Cookie)
+	// 1. Login Handler
 	app.Post("/login", func(c *fiber.Ctx) error {
 		type LoginRequest struct {
-            // Add 'form' tag so it works even if sent as form data
-            IDToken string `json:"idToken" form:"idToken"`
-        }
-        
+			IDToken string `json:"idToken" form:"idToken"`
+		}
+
 		var req LoginRequest
-		// NEW DEBUG CODE:
 		if err := c.BodyParser(&req); err != nil {
-			log.Println("LOGIN ERROR:", err) // Print error to terminal
-			log.Println("RAW BODY:", string(c.Body())) // Print what we actually received
+			log.Println("LOGIN ERROR:", err)
 			return c.Status(400).SendString("Bad Request: " + err.Error())
 		}
 
-		// Verify Token via Firebase Admin SDK
-		client, err := firebaseApp.Auth(context.Background())
-		if err != nil {
-			log.Printf("FIREBASE AUTH CLIENT ERROR: %v", err)
-			return c.Status(500).SendString("Auth Error")
-		}
-		
-		token, err := client.VerifyIDToken(context.Background(), req.IDToken)
+		token, err := server.Verifier.VerifyIDToken(context.Background(), req.IDToken)
 		if err != nil {
 			return c.Status(401).SendString("Invalid Token")
 		}
@@ -170,20 +124,19 @@ func main() {
 			return c.Status(403).SendString("Access Denied: @gmail.com accounts only.")
 		}
 
-		// Set HTTP-Only Cookie (Secure!)
+		// Set HTTP-Only Cookie
 		c.Cookie(&fiber.Cookie{
 			Name:     "session_user",
-			Value:    email, // In prod: Encrypt this value!
+			Value:    email,
 			HTTPOnly: true,
 			Expires:  time.Now().Add(24 * time.Hour),
 			SameSite: "Strict",
 		})
 
-		// Return the Chat Interface (HTMX Swap)
 		return c.Render("chat", nil)
 	})
 
-	// 2. WebSocket Middleware (Protects /ws)
+ 	// 2. WebSocket Middleware (Protects /ws)
     // UPDATED: Supports both Web Cookies AND Mobile Auth Headers
     app.Use("/ws", func(c *fiber.Ctx) error {
         // Source A: Try to get email from Cookie (Web Client)
@@ -227,22 +180,25 @@ func main() {
 	// 3. WebSocket Handler
 	app.Get("/ws", websocket.New(func(c *websocket.Conn) {
 		email := c.Locals("email").(string)
-		
-		// Create Client State
+
 		client := &Client{
 			Email:       email,
-			DisplayName: "Anonymous", // The mask
+			DisplayName: "Anonymous",
 		}
 
-		clients[c] = client
-		register <- c
-		
+		server.clientsMu.Lock()
+		server.clients[c] = client
+		server.clientsMu.Unlock()
+
+		server.register <- c
+
 		defer func() {
-			unregister <- c
+			server.unregister <- c
 			c.Close()
 		}()
 
 		// Pre-parse template
+		// Note: This assumes CWD is root. In tests, might need adjustment if not running from root.
 		tmpl, _ := template.ParseFiles("views/message.html")
 
 		for {
@@ -265,7 +221,6 @@ func main() {
             // --- AUDIT LOGGING ---
             log.Printf("[AUDIT] User: %s | Message: %s", client.Email, p.Text)
 
-			// --- PUBLIC BROADCAST (Anonymous) ---
 			msgData := MessageData{
 				DisplayName: client.DisplayName,
 				Content:     p.Text,
@@ -273,12 +228,17 @@ func main() {
 			}
 
 			var tpl bytes.Buffer
-			if err := tmpl.Execute(&tpl, msgData); err != nil {
-				continue
+			// Check if tmpl is nil (e.g. file not found)
+			if tmpl != nil {
+				if err := tmpl.Execute(&tpl, msgData); err != nil {
+					continue
+				}
+			} else {
+				// Fallback if template loading failed (e.g. in tests)
+				tpl.WriteString(p.Text)
 			}
 
-			// Publish to MemoryStore (Cloud or Local)
-			store.Publish("chat", tpl.Bytes())
+			server.Store.Publish("chat", tpl.Bytes())
 		}
 	}))
 
@@ -287,9 +247,62 @@ func main() {
 		return c.Render("index", fiber.Map{"Title": "Secure Chat"})
 	})
 
-	go runHub()
+	return app
+}
+
+func initFirebase() *firebase.App {
+	var opts []option.ClientOption
+
+	if _, err := os.Stat("serviceAccountKey.json"); err == nil {
+		log.Println("Using local serviceAccountKey.json")
+		opts = append(opts, option.WithCredentialsFile("serviceAccountKey.json"))
+	} else {
+		log.Println("Using Application Default Credentials (Cloud Run)")
+	}
+
+	projectID := os.Getenv("GOOGLE_CLOUD_PROJECT")
+	if projectID == "" {
+		projectID = "ghostme-34590"
+		log.Printf("GOOGLE_CLOUD_PROJECT not set. Using fallback: %s", projectID)
+	}
+
+	config := &firebase.Config{ProjectID: projectID}
+
+	app, err := firebase.NewApp(context.Background(), config, opts...)
+	if err != nil {
+		log.Fatalf("Error initializing Firebase: %v", err)
+	}
+	return app
+}
+
+func main() {
+	mime.AddExtensionType(".js", "application/javascript")
+
+	firebaseApp := initFirebase()
+	verifier, err := NewFirebaseVerifier(firebaseApp)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	var store *memorystore.MemoryStore
+	projectID := os.Getenv("GOOGLE_CLOUD_PROJECT")
+	if projectID != "" {
+		log.Println("Using GCP PubSub")
+		store = memorystore.NewMemoryStoreWithConfig(memorystore.Config{GCPProjectID: projectID})
+	} else {
+		log.Println("Using In-Memory PubSub")
+		store = memorystore.NewMemoryStore()
+	}
+	defer store.Stop()
+
+	server := NewServer(store, verifier)
+	go server.RunHub()
+
+	app := SetupApp(server)
 
 	port := os.Getenv("PORT")
-	if port == "" { port = "8080" }
+	if port == "" {
+		port = "8080"
+	}
 	log.Fatal(app.Listen(":" + port))
 }
