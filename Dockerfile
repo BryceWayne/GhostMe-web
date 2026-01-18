@@ -10,7 +10,7 @@ RUN go mod download
 # Build the binary
 COPY . .
 # CGO_ENABLED=0 ensures a static binary that runs on Alpine
-RUN CGO_ENABLED=0 GOOS=linux go build -o main .
+RUN CGO_ENABLED=0 GOOS=linux go build -o main ./cmd/server
 
 # --- Stage 2: Runtime ---
 FROM alpine:latest

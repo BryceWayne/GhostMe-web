@@ -1,4 +1,4 @@
-package main
+package api
 
 import (
 	"context"
@@ -7,10 +7,12 @@ import (
 	"testing"
 
 	"firebase.google.com/go/v4/auth"
+	"github.com/BryceWayne/GhostMe-web/internal/chat"
 	"github.com/BryceWayne/MemoryStore/memorystore"
 	"github.com/gofiber/fiber/v2"
 )
 
+// MockVerifier implements auth.Verifier for testing
 type MockVerifier struct {
 	ShouldFail bool
 	Email      string
@@ -31,8 +33,8 @@ func TestIndex(t *testing.T) {
 	store := memorystore.NewMemoryStore()
 	defer store.Stop()
 	verifier := &MockVerifier{}
-	server := NewServer(store, verifier)
-	app := SetupApp(server)
+	server := chat.NewServer(store, verifier)
+	app := SetupApp(server, "../../views", "../../public")
 
 	req := httptest.NewRequest("GET", "/", nil)
 	resp, err := app.Test(req)
@@ -49,8 +51,8 @@ func TestLoginSuccess(t *testing.T) {
 	store := memorystore.NewMemoryStore()
 	defer store.Stop()
 	verifier := &MockVerifier{Email: "test@gmail.com"}
-	server := NewServer(store, verifier)
-	app := SetupApp(server)
+	server := chat.NewServer(store, verifier)
+	app := SetupApp(server, "../../views", "../../public")
 
 	body := strings.NewReader(`{"idToken": "valid_token"}`)
 	req := httptest.NewRequest("POST", "/login", body)
@@ -83,8 +85,8 @@ func TestLoginInvalidEmail(t *testing.T) {
 	store := memorystore.NewMemoryStore()
 	defer store.Stop()
 	verifier := &MockVerifier{Email: "test@other.com"}
-	server := NewServer(store, verifier)
-	app := SetupApp(server)
+	server := chat.NewServer(store, verifier)
+	app := SetupApp(server, "../../views", "../../public")
 
 	body := strings.NewReader(`{"idToken": "valid_token"}`)
 	req := httptest.NewRequest("POST", "/login", body)
@@ -104,8 +106,8 @@ func TestLoginFailure(t *testing.T) {
 	store := memorystore.NewMemoryStore()
 	defer store.Stop()
 	verifier := &MockVerifier{ShouldFail: true}
-	server := NewServer(store, verifier)
-	app := SetupApp(server)
+	server := chat.NewServer(store, verifier)
+	app := SetupApp(server, "../../views", "../../public")
 
 	body := strings.NewReader(`{"idToken": "invalid_token"}`)
 	req := httptest.NewRequest("POST", "/login", body)
@@ -125,8 +127,8 @@ func TestWebSocketUnauthorized(t *testing.T) {
 	store := memorystore.NewMemoryStore()
 	defer store.Stop()
 	verifier := &MockVerifier{}
-	server := NewServer(store, verifier)
-	app := SetupApp(server)
+	server := chat.NewServer(store, verifier)
+	app := SetupApp(server, "../../views", "../../public")
 
 	req := httptest.NewRequest("GET", "/ws", nil)
 	// No cookie set
