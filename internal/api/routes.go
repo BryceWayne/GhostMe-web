@@ -14,7 +14,8 @@ import (
 
 // SetupApp configures the Fiber app and routes
 func SetupApp(server *chat.Server, viewsPath, publicPath string) *fiber.App {
-	server.ViewsPath = viewsPath
+	// Note: We avoid setting server.ViewsPath here to avoid side effects.
+	// The server should be configured before passing it to SetupApp.
 
 	engine := html.New(viewsPath, ".html")
 	app := fiber.New(fiber.Config{Views: engine})
@@ -39,8 +40,8 @@ func SetupApp(server *chat.Server, viewsPath, publicPath string) *fiber.App {
 		}
 
 		// Check Claims
-		email, _ := token.Claims["email"].(string)
-		if !strings.HasSuffix(email, "@gmail.com") {
+		email, ok := token.Claims["email"].(string)
+		if !ok || !strings.HasSuffix(email, "@gmail.com") {
 			return c.Status(403).SendString("Access Denied: @gmail.com accounts only.")
 		}
 

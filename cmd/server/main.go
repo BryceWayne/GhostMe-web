@@ -61,6 +61,7 @@ func main() {
 	defer store.Stop()
 
 	server := chat.NewServer(store, verifier)
+	server.ViewsPath = "./views"
 	go server.RunHub()
 
 	app := api.SetupApp(server, "./views", "./public")

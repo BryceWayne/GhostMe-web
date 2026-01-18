@@ -68,13 +68,33 @@ func (s *Server) RunHub() {
 func (s *Server) broadcastToLocalClients(html string) {
 	s.clientsMu.RLock()
 	defer s.clientsMu.RUnlock()
-	for connection, c := range s.clients {
-		go func(conn *websocket.Conn, client *models.Client) {
-			client.Lock()
-			defer client.Unlock()
-			// Fire and forget
-			conn.WriteMessage(websocket.TextMessage, []byte(html))
-		}(connection, c)
+	for _, c := range s.clients {
+		select {
+		case c.Send <- []byte(html):
+		default:
+			// If channel is full, we might drop the message or close connection.
+			// For now, we drop to avoid blocking.
+		}
+	}
+}
+
+// writePump pumps messages from the hub to the websocket connection.
+func (s *Server) writePump(c *websocket.Conn, client *models.Client) {
+	defer func() {
+		c.Close()
+	}()
+	for {
+		message, ok := <-client.Send
+		if !ok {
+			// Channel closed
+			c.WriteMessage(websocket.CloseMessage, []byte{})
+			return
+		}
+
+		c.SetWriteDeadline(time.Now().Add(10 * time.Second))
+		if err := c.WriteMessage(websocket.TextMessage, message); err != nil {
+			return
+		}
 	}
 }
 
@@ -90,6 +110,7 @@ func (s *Server) HandleWebSocket(c *websocket.Conn) {
 	client := &models.Client{
 		Email:       email,
 		DisplayName: "Anonymous",
+		Send:        make(chan []byte, 256), // Buffered channel
 	}
 
 	s.clientsMu.Lock()
@@ -98,8 +119,12 @@ func (s *Server) HandleWebSocket(c *websocket.Conn) {
 
 	s.register <- c
 
+	// Start write pump in a separate goroutine
+	go s.writePump(c, client)
+
 	defer func() {
 		s.unregister <- c
+		close(client.Send) // Close channel to stop writePump
 		c.Close()
 	}()
 

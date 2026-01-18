@@ -4,8 +4,9 @@ import "sync"
 
 // Client represents a connected user
 type Client struct {
-	Email       string // REAL Identity (for logging)
-	DisplayName string // FAKE Identity (for UI)
+	Email       string      // REAL Identity (for logging)
+	DisplayName string      // FAKE Identity (for UI)
+	Send        chan []byte // Buffered channel of outbound messages.
 	mu          sync.Mutex
 }
 
