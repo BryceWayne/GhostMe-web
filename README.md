@@ -39,6 +39,17 @@ graph TD
 * **State & Pub/Sub:** [BryceWayne/MemoryStore](https://github.com/BryceWayne/MemoryStore)
 * **Auth:** Firebase Authentication (Google Provider)
 
+## 🧪 Testing & Coverage
+
+To run the full test suite and view coverage:
+
+```bash
+go test -coverpkg=./... -coverprofile=coverage.out ./...
+go tool cover -func=coverage.out
+```
+
+**Current Coverage:** ~58% (High coverage on core WebSocket logic and API handlers).
+
 ## 🕯️ Incantations (Local Development)
 
 ### Prerequisites
