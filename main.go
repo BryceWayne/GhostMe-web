@@ -149,17 +149,14 @@ func SetupApp(server *Server) *fiber.App {
                 idToken := strings.TrimPrefix(authHeader, "Bearer ")
                 
                 // Verify the token on the fly
-                client, err := firebaseApp.Auth(context.Background())
+                token, err := server.Verifier.VerifyIDToken(context.Background(), idToken)
                 if err == nil {
-                    token, err := client.VerifyIDToken(context.Background(), idToken)
-                    if err == nil {
-                        // Success! Extract email from token
-                        if claimsEmail, ok := token.Claims["email"].(string); ok {
-                            email = claimsEmail
-                        }
-                    } else {
-                        log.Printf("Mobile Auth Failed: %v", err)
+                    // Success! Extract email from token
+                    if claimsEmail, ok := token.Claims["email"].(string); ok {
+                        email = claimsEmail
                     }
+                } else {
+                    log.Printf("Mobile Auth Failed: %v", err)
                 }
             }
         }
