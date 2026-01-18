@@ -105,7 +105,10 @@ func (s *Server) HandleWebSocket(c *websocket.Conn) {
 
 	// Pre-parse template
 	// Note: This assumes CWD is root. In tests, might need adjustment if not running from root.
-	tmpl, _ := template.ParseFiles(filepath.Join(s.ViewsPath, "message.html"))
+	tmpl, err := template.ParseFiles(filepath.Join(s.ViewsPath, "message.html"))
+	if err != nil {
+		log.Printf("Error parsing template: %v", err)
+	}
 
 	for {
 		type Payload struct {
