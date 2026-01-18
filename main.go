@@ -136,19 +136,46 @@ func SetupApp(server *Server) *fiber.App {
 		return c.Render("chat", nil)
 	})
 
-	// 2. WebSocket Middleware
-	app.Use("/ws", func(c *fiber.Ctx) error {
-		email := c.Cookies("session_user")
-		if email == "" {
-			return c.Status(401).SendString("Unauthorized")
-		}
-		c.Locals("email", email)
+ 	// 2. WebSocket Middleware (Protects /ws)
+    // UPDATED: Supports both Web Cookies AND Mobile Auth Headers
+    app.Use("/ws", func(c *fiber.Ctx) error {
+        // Source A: Try to get email from Cookie (Web Client)
+        email := c.Cookies("session_user")
 
-		if websocket.IsWebSocketUpgrade(c) {
-			return c.Next()
-		}
-		return fiber.ErrUpgradeRequired
-	})
+        // Source B: If no cookie, try Authorization Header (Mobile Client)
+        if email == "" {
+            authHeader := c.Get("Authorization")
+            if strings.HasPrefix(authHeader, "Bearer ") {
+                idToken := strings.TrimPrefix(authHeader, "Bearer ")
+                
+                // Verify the token on the fly
+                client, err := firebaseApp.Auth(context.Background())
+                if err == nil {
+                    token, err := client.VerifyIDToken(context.Background(), idToken)
+                    if err == nil {
+                        // Success! Extract email from token
+                        if claimsEmail, ok := token.Claims["email"].(string); ok {
+                            email = claimsEmail
+                        }
+                    } else {
+                        log.Printf("Mobile Auth Failed: %v", err)
+                    }
+                }
+            }
+        }
+
+        // Final Check: Did we find a valid email from either source?
+        if email == "" {
+            return c.Status(401).SendString("Unauthorized: No valid cookie or token found")
+        }
+
+        c.Locals("email", email)
+        
+        if websocket.IsWebSocketUpgrade(c) {
+            return c.Next()
+        }
+        return fiber.ErrUpgradeRequired
+    })
 
 	// 3. WebSocket Handler
 	app.Get("/ws", websocket.New(func(c *websocket.Conn) {
@@ -183,7 +210,16 @@ func SetupApp(server *Server) *fiber.App {
 				break
 			}
 
-			log.Printf("[AUDIT] User: %s | Message: %s", client.Email, p.Text)
+			// 1. REJECT EMPTY VOID MESSAGES
+            if strings.TrimSpace(p.Text) == "" {
+                continue 
+            }
+
+            // PARSE EMOJIS (The Ghost Translation Layer) ---
+            p.Text = strings.ReplaceAll(p.Text, ":ghost:", "👻")
+
+            // --- AUDIT LOGGING ---
+            log.Printf("[AUDIT] User: %s | Message: %s", client.Email, p.Text)
 
 			msgData := MessageData{
 				DisplayName: client.DisplayName,
