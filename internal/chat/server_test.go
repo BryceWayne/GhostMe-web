@@ -27,6 +27,19 @@ func (m *MockVerifier) VerifyIDToken(ctx context.Context, idToken string) (*auth
 	}, nil
 }
 
+// helper to add a test client
+func addTestClient(s *Server) *models.Client {
+	client := &models.Client{
+		Email:       "test@example.com",
+		DisplayName: "TestUser",
+		Send:        make(chan []byte, 10),
+	}
+	s.clientsMu.Lock()
+	s.clients[nil] = client
+	s.clientsMu.Unlock()
+	return client
+}
+
 func TestNewServer(t *testing.T) {
 	store := memorystore.NewMemoryStore()
 	defer store.Stop()
@@ -52,17 +65,7 @@ func TestServer_BroadcastToLocalClients(t *testing.T) {
 	server.broadcastToLocalClients("<div>Hello</div>")
 
 	// Test 2: With a client
-	client := &models.Client{
-		Email:       "test@example.com",
-		DisplayName: "TestUser",
-		Send:        make(chan []byte, 10),
-	}
-
-	// Manually add client to the private map
-	server.clientsMu.Lock()
-	// We use nil key because broadcastToLocalClients iterates over values
-	server.clients[nil] = client
-	server.clientsMu.Unlock()
+	client := addTestClient(server)
 
 	msg := "<div>Hello World</div>"
 	server.broadcastToLocalClients(msg)
@@ -82,14 +85,7 @@ func TestServer_RunHub_Delivery(t *testing.T) {
 	server := NewServer(store, verifier)
 
 	// Manually add a client
-	client := &models.Client{
-		Email:       "test@example.com",
-		DisplayName: "TestUser",
-		Send:        make(chan []byte, 10),
-	}
-	server.clientsMu.Lock()
-	server.clients[nil] = client
-	server.clientsMu.Unlock()
+	client := addTestClient(server)
 
 	// Start Hub
 	go server.RunHub()
