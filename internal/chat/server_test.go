@@ -2,11 +2,17 @@ package chat
 
 import (
 	"context"
+	"net/http"
+	"strings"
 	"testing"
 	"time"
 
 	"firebase.google.com/go/v4/auth"
+	"github.com/BryceWayne/GhostMe-web/internal/models"
 	"github.com/BryceWayne/MemoryStore/memorystore"
+	"github.com/fasthttp/websocket"
+	"github.com/gofiber/fiber/v2"
+	gofiberwebsocket "github.com/gofiber/websocket/v2"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -14,7 +20,11 @@ import (
 type MockVerifier struct{}
 
 func (m *MockVerifier) VerifyIDToken(ctx context.Context, idToken string) (*auth.Token, error) {
-	return nil, nil
+	return &auth.Token{
+		Claims: map[string]interface{}{
+			"email": "test@example.com",
+		},
+	}, nil
 }
 
 func TestNewServer(t *testing.T) {
@@ -33,35 +43,139 @@ func TestNewServer(t *testing.T) {
 }
 
 func TestServer_BroadcastToLocalClients(t *testing.T) {
-	// This test mainly verifies that it doesn't panic when no clients are connected
 	store := memorystore.NewMemoryStore()
 	defer store.Stop()
 	verifier := &MockVerifier{}
 	server := NewServer(store, verifier)
 
-	// Should not panic
+	// Test 1: No clients (should not panic)
 	server.broadcastToLocalClients("<div>Hello</div>")
 
-	// To test with clients, we would need to mock websocket.Conn which is hard.
-	// We'll rely on integration tests for that.
+	// Test 2: With a client
+	client := &models.Client{
+		Email:       "test@example.com",
+		DisplayName: "TestUser",
+		Send:        make(chan []byte, 10),
+	}
+
+	// Manually add client to the private map
+	server.clientsMu.Lock()
+	// We use nil key because broadcastToLocalClients iterates over values
+	server.clients[nil] = client
+	server.clientsMu.Unlock()
+
+	msg := "<div>Hello World</div>"
+	server.broadcastToLocalClients(msg)
+
+	select {
+	case received := <-client.Send:
+		assert.Equal(t, msg, string(received))
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("Timeout waiting for message")
+	}
 }
 
-func TestServer_RunHub_Integration(t *testing.T) {
+func TestServer_RunHub_Delivery(t *testing.T) {
 	store := memorystore.NewMemoryStore()
 	defer store.Stop()
 	verifier := &MockVerifier{}
 	server := NewServer(store, verifier)
+
+	// Manually add a client
+	client := &models.Client{
+		Email:       "test@example.com",
+		DisplayName: "TestUser",
+		Send:        make(chan []byte, 10),
+	}
+	server.clientsMu.Lock()
+	server.clients[nil] = client
+	server.clientsMu.Unlock()
 
 	// Start Hub
 	go server.RunHub()
 
-	// Wait for subscription
+	// Wait for subscription to be established
 	time.Sleep(100 * time.Millisecond)
 
-	// Publish a message
-	server.Store.Publish("chat", []byte("test message"))
+	// Publish a message to the store
+	expectedMsg := "test message"
+	server.Store.Publish("chat", []byte(expectedMsg))
 
-	// Since we have no clients, we can't verify receipt easily here without mocking internal state,
-	// but we can ensure it doesn't crash.
-	time.Sleep(50 * time.Millisecond)
+	// Verify client receives it
+	select {
+	case received := <-client.Send:
+		assert.Equal(t, expectedMsg, string(received))
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Timeout waiting for message from hub")
+	}
+}
+
+func TestServer_HandleWebSocket_Integration(t *testing.T) {
+	// Setup Server
+	store := memorystore.NewMemoryStore()
+	defer store.Stop()
+	verifier := &MockVerifier{}
+	server := NewServer(store, verifier)
+	// Point to a directory that exists, e.g. ../../views if running from root, or use absolute.
+	// We will try to rely on "views" folder if it exists in root, otherwise we might need to mock template loading or ensure path is correct.
+	// Since we run tests from root, "./views" should exist.
+	server.ViewsPath = "../../views" // Assumes running from internal/chat, adjust if needed.
+	// Wait, "go test ./..." usually sets CWD to the package directory.
+	// So if in internal/chat, we need ../../views.
+
+	// Start Hub
+	go server.RunHub()
+
+	// Setup Fiber App
+	app := fiber.New()
+
+	// Middleware to mock authentication and set Locals
+	app.Use("/ws", func(c *fiber.Ctx) error {
+		c.Locals("email", "test@example.com")
+		if gofiberwebsocket.IsWebSocketUpgrade(c) {
+			return c.Next()
+		}
+		return fiber.ErrUpgradeRequired
+	})
+
+	app.Get("/ws", gofiberwebsocket.New(server.HandleWebSocket))
+
+	// Start App in Goroutine
+	go func() {
+		app.Listen(":9998")
+	}()
+	time.Sleep(200 * time.Millisecond) // Wait for start
+	defer app.Shutdown()
+
+	// Client Connect
+	dialer := websocket.Dialer{
+		HandshakeTimeout: 5 * time.Second,
+	}
+	conn, _, err := dialer.Dial("ws://localhost:9998/ws", http.Header{})
+	if err != nil {
+		t.Fatalf("Failed to dial: %v", err)
+	}
+	defer conn.Close()
+
+	// Send Message
+	msg := `{"text": "Integration Test :ghost:"}`
+	if err := conn.WriteMessage(websocket.TextMessage, []byte(msg)); err != nil {
+		t.Fatalf("Failed to write: %v", err)
+	}
+
+	// Read Response
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_, p, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("Failed to read: %v", err)
+	}
+
+	response := string(p)
+	// Check if GhostMe translation worked
+	if !strings.Contains(response, "Integration Test 👻") {
+		t.Errorf("Expected translated message, got: %s", response)
+	}
+
+	// Check if template rendering worked (look for HTML tags if using template)
+	// If template failed to load, it falls back to raw text, so checking content is safer.
 }
